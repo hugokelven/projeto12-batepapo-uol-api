@@ -27,38 +27,84 @@ promessa.catch(err => {
 app.post("/participants", (req, res) => {
     const {name} = req.body
 
-    if (!name) {
-        res.sendStatus(405)
+    const usuarioSchema = Joi.object({
+        name: Joi.string().required()
+    })
+
+    const validacao = usuarioSchema.validate(req.body);
+
+    if (validacao.error) {
+        console.log(validacao.error.details)
+        res.status(422).send(validacao.error.details[0].message)
         return
     }
 
-	db.collection("usuariosOnline").insertOne(
-        {
-            name, 
-            lastStatus: Date.now()
+    db.collection("usuariosOnline").find({name}).toArray().then(usuarios => {
+        console.log(usuarios)
+
+        if (usuarios.length > 0) {
+            res.sendStatus(409)
+            return
         }
-    ).then(() => {
 
-        db.collection("mensagens").insertOne(
+        db.collection("usuariosOnline").insertOne(
             {
-                from: name,
-                to: 'Todos', 
-                text: 'entra na sala...', 
-                type: 'status', 
-                time: dayjs().format("HH:mm:ss")
+                name, 
+                lastStatus: Date.now()
             }
-        )
+        ).then(() => {
+    
+            db.collection("mensagens").insertOne(
+                {
+                    from: name,
+                    to: 'Todos', 
+                    text: 'entra na sala...', 
+                    type: 'status', 
+                    time: dayjs().format("HH:mm:ss")
+                }
+            )
+    
+            res.sendStatus(201)
+        }).catch(() => {
+            res.send("Deu erro")
+        })
 
-		res.sendStatus(201)
-	}).catch(() => {
-        res.send("Deu erro")
-    })
+    }).catch(err => {console.log(err)})
 })
 
 app.get("/participants", (req, res) => {
     db.collection("usuariosOnline").find().toArray().then(usuariosOnline => {
         res.send(usuariosOnline)
     })
+})
+
+app.post("/messages", (req, res) => {
+    const {to, text, type} = req.body
+    const {user} = req.headers
+
+    const mensagem = {
+        to,
+        text,
+        type,
+        from: user
+    }
+
+    const mensagemSchema = Joi.object({
+        to: Joi.string().required(),
+        text: Joi.string().required(),
+        type: Joi.string().valid("message", "private_message").required(),
+        from: Joi.string().required()
+    })
+
+    const validacao = mensagemSchema.validate(mensagem);
+
+    if (validacao.error) {
+        console.log(validacao.error.details)
+        res.status(422).send(validacao.error.details[0].message)
+        return
+    }
+
+    db.collection("mensagens").insertOne({...mensagem, time: dayjs().format("HH:mm:ss")})
 })
 
 app.listen(5000, () => {
