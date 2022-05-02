@@ -4,25 +4,21 @@ import cors from 'cors'
 import chalk from 'chalk'
 import dayjs from 'dayjs'
 import Joi from 'joi'
-// import dotenv from "dotenv"
+import dotenv from "dotenv"
 
 const app = express()
 app.use(cors())
 app.use(json())
-// dotenv.config()
+dotenv.config()
 
-const mongoClient = new MongoClient("mongodb://localhost:27017")
+console.log(process.env.MONGO_URI)
+
+const mongoClient = new MongoClient(process.env.MONGO_URI)
 let db
 
-const promessa = mongoClient.connect()
-
-promessa.then(() => {
-	db = mongoClient.db("projeto12-batepapo-uol-api")
-})
-
-promessa.catch(err => {
-    console.log(err)
-})
+mongoClient.connect()
+    .then(() => {db = mongoClient.db(process.env.DB)})
+    .catch(err => {console.log("Erro ao conectar com o banco de dados", err)})
 
 app.post("/participants", (req, res) => {
     const {name} = req.body
@@ -107,6 +103,69 @@ app.post("/messages", (req, res) => {
     db.collection("mensagens").insertOne({...mensagem, time: dayjs().format("HH:mm:ss")})
 })
 
-app.listen(5000, () => {
-    console.log(chalk.bold.green("Aplicação rodando na porta 5000"))
+app.get("/messages", (req, res) => {
+    const {limit} = req.query
+
+    db.collection("mensagens")
+        .find().toArray()
+        .then(mensagens => {
+            if (mensagens.length < limit) {
+                res.send([...mensagens].splice(0, mensagens.length))
+                return
+            }
+
+            res.send([...mensagens].splice(0, mensagens.length - limit))
+        })
+})
+
+app.post("/status", (req, res) => {
+    let {user} = req.headers
+
+    db.collection("usuariosOnline")
+        .findOne({name: user})
+        .then(usuario => {
+            if (!usuario) {
+                res.sendStatus(404)
+                return
+            }
+
+            db.collection("usuariosOnline")
+                .updateOne({name: user}, {$set: {"lastStatus": Date.now()}})
+                .then(() => {res.sendStatus(200)})
+                .catch(err => {console.log("Erro ao atualizar status", err)})
+        })
+        .catch(err => {
+            console.log("Erro ao procurar usuário", err)
+        })
+})
+
+setInterval(() => {
+    db.collection("usuariosOnline")
+        .find({lastStatus: {$lt: Date.now() - 10000}}).toArray()
+        .then(usuarios => {
+            const usuariosIds = usuarios.map(usuario => usuario._id)
+
+            db.collection("usuariosOnline")
+                .deleteMany({_id: {$in: usuariosIds}})
+                .then(() => {
+                    const mensagens = usuarios.map(usuario => {
+                        return {
+                            from: usuario.name,
+                            to: 'Todos', 
+                            text: 'sai da sala...', 
+                            type: 'status', 
+                            time: dayjs().format("HH:mm:ss")
+                        }
+                    })
+
+                    if (mensagens.length > 0) {
+                        db.collection("mensagens")
+                            .insertMany(mensagens)
+                    }
+                })
+        })
+}, 15000)
+
+app.listen(process.env.PORTA, () => {
+    console.log(chalk.bold.green(`Aplicação rodando na porta ${process.env.PORTA}`))
 })
